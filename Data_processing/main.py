@@ -1,12 +1,11 @@
 import torch
 import os
+from torch.utils.data import Dataset, DataLoader
 
-# 1.1 Download and Load TinyShakespeare (if you don't have it already)
-
-# This part downloads the data only if it does not exist already.
+# 1. Re-run Data Loading and Encoding (from previous step) - For completeness
 DATA_URL = 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
 DATA_FILE = 'input.txt'
-DATA_DIR = 'data'  # Create a directory to store the data
+DATA_DIR = 'data'
 
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
@@ -21,47 +20,73 @@ filepath = os.path.join(DATA_DIR, DATA_FILE)
 with open(filepath, 'r', encoding='utf-8') as f:
     text = f.read()
 
-# 1.3 Lowercase the Text
 text = text.lower()
-
-# 1.2 Character-Level Tokenization and 1.4 Create Vocabulary
-chars = sorted(list(set(text)))  # Get unique characters and sort them
+chars = sorted(list(set(text)))
 vocab_size = len(chars)
-print(f"Vocabulary Size: {vocab_size}") # print the vocab size so we know how many tokens we will need
-
-# Create mappings from character to index and index to character
 char_to_index = {ch: i for i, ch in enumerate(chars)}
 index_to_char = {i: ch for i, ch in enumerate(chars)}
 
-
-# Example usage:
-print("Example:")
-print(f"Text (first 100 chars): {text[:100]}")
-print(f"Character-to-Index mapping (first 5): {list(char_to_index.items())[:5]}")
-print(f"Index-to-Character mapping (first 5): {list(index_to_char.items())[:5]}")
-
-
-# Function to encode text into a list of indices
 def encode(text):
     return [char_to_index[ch] for ch in text]
 
-# Function to decode a list of indices back into text
 def decode(indices):
     return ''.join([index_to_char[i] for i in indices])
 
-# Example Encode/Decode
-encoded_text = encode("hello")
-decoded_text = decode(encoded_text)
-print(f"Encoded 'hello': {encoded_text}")
-print(f"Decoded back: {decoded_text}")
+data = torch.tensor(encode(text), dtype=torch.long)
 
 
+# 2. Create Training and Validation Sets
+train_val_split = 0.9  # 90% for training, 10% for validation
+n = int(train_val_split * len(data))
+train_data = data[:n]
+val_data = data[n:]
 
-# Convert the entire text to indices
-data = torch.tensor(encode(text), dtype=torch.long) # Create a tensor from the encoded text
-print(f"Length of encoded data: {len(data)}")
-print(f"First 100 encoded values: {data[:100]}")
-
-# Now, 'data' is a PyTorch tensor containing the encoded text.  This is what we'll feed into our model.
+print(f"Length of training data: {len(train_data)}")
+print(f"Length of validation data: {len(val_data)}")
 
 
+# 3. Define a Custom Dataset
+class CharDataset(Dataset):
+    def __init__(self, data, block_size):
+        self.data = data
+        self.block_size = block_size #sequence_length from last turn
+
+    def __len__(self):
+        return len(self.data) - self.block_size #ensure that we always have a full block_size sequence
+
+    def __getitem__(self, idx):
+        # Grab a chunk of (block_size + 1) characters from the data
+        chunk = self.data[idx:idx + self.block_size + 1] # + 1 because we need input AND target
+        x = chunk[:-1]  # Input sequence (all but the last token)
+        y = chunk[1:]   # Target sequence (all but the first token, shifted by one)
+
+        return {'input': x, 'target': y} # Return as a dictionary
+
+# 4. Create DataLoaders
+block_size = 32 #sequence_length from last turn
+
+train_dataset = CharDataset(train_data, block_size)
+val_dataset = CharDataset(val_data, block_size)
+
+batch_size = 32  # You can adjust this
+train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)  #shuffle the training set to reduce overfitting
+val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)   #we do not shuffle the validation set, we want consistent output
+
+# 5. Test the DataLoader (Important!)
+# Get a batch from the training dataloader
+batch = next(iter(train_dataloader))
+inputs = batch['input']
+targets = batch['target']
+
+print("Sample Batch:")
+print(f"Input shape: {inputs.shape}")    # Should be [batch_size, block_size]
+print(f"Target shape: {targets.shape}")  # Should be [batch_size, block_size]
+print(f"Sample input batch:\n{inputs}")
+print(f"Sample target batch:\n{targets}")
+
+# Example: Decode a sequence from the batch
+sample_sequence_index = 0
+sample_input = inputs[sample_sequence_index].tolist()
+sample_target = targets[sample_sequence_index].tolist()
+print(f"Decoded input sequence: {decode(sample_input)}")
+print(f"Decoded target sequence: {decode(sample_target)}")
